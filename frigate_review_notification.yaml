@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (v16)
+  name: Frigate Review Notification (2026-09-06)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -33,7 +33,7 @@ blueprint:
     Requires the Frigate integration (MQTT 'frigate/reviews') and the HA
     companion app.
 
-    v16 changes: the 'Final GIF preview source' choice was removed - the
+    2026-09-06 changes: the 'Final GIF preview source' choice was removed - the
     event-end GIF is now always the triggering detection's own
     event_preview.gif. Added 'Notification Icon (Optional - Android)'
     (notification_icon): the Android status-bar icon can be a fixed 'mdi:'

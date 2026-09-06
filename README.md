@@ -2,8 +2,9 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** v16 (2026-09-06)
+- **Version:** 2026-09-06 (date-based versioning — the version is the release date)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
+- **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
 ## What it does
 
@@ -14,7 +15,7 @@ A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 - **GenAI safety net:** a dedicated MQTT trigger re-asserts the AI title/summary `genai_send_delay` seconds after Frigate publishes it (covers late summaries / HA restarts).
 - Configurable: notification icon, Android channel, sound, cooldown, alert-once, click action, action buttons (Clip / Snapshot / Silence 30 min), multiple `notify.` targets.
 
-## v16 changes
+## Changes in 2026-09-06
 
 - Removed the Review/Event GIF choice — the event-end GIF is always the triggering detection's own `event_preview.gif`.
 - Added **Notification Icon (Optional - Android)** (`notification_icon`): a fixed `mdi:` name or a template; the default matches the detected object (person → `mdi:account`, cat → `mdi:cat`, dog → `mdi:dog`, car → `mdi:car`, package/amazon → `mdi:package-variant`, else `mdi:cctv`).
@@ -27,5 +28,5 @@ A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
 ## History
 
-- **v13–v15:** GenAI delivery timing fixes — AI title now arrives with the end-GIF update; delayed re-assertion kept as a safety net.
-- **v16:** Event GIF hardcoded; Android notification icon added.
+- **2026-09-06:** Event GIF hardcoded; Android notification icon added; switched to date-based versioning.
+- **Earlier (Sep 2026):** GenAI delivery timing fixes — AI title arrives with the end-GIF update; delayed re-assertion kept as a safety net.
