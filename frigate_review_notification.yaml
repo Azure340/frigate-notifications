@@ -1,0 +1,594 @@
+blueprint:
+  name: Frigate Review Notification (v16)
+  description: >-
+    Three-phase Frigate review notification, one automation per camera selection.
+    Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
+    review severity matches the selected boxes. Frigate publishes reviews
+    starting as 'detection' and escalates to 'alert' when an object enters an
+    alert zone, so if you select only 'alert' the notification simply waits for
+    the escalation instead of being missed.
+
+    After Phase 1 the main run updates the SAME notification in place (silently):
+      - Event end -> swaps the snapshot for the triggering detection's own
+        preview GIF (event_preview.gif). The end update also LISTENS for the
+        genai message during the GIF delay window, so when Frigate publishes
+        the AI summary quickly (typical: 1-2s after end) the AI title/summary
+        arrives TOGETHER with the GIF in one update.
+      - Sub-label changes -> refresh the message.
+    GenAI is ALSO handled by a dedicated MQTT trigger that re-asserts the AI
+    update 'Delay before AI title update' seconds after Frigate publishes it -
+    this is the safety net for summaries that arrive after the main run
+    finished (minutes late, HA restarts, etc.). The re-assertion delay must
+    stay longer than the GIF delay so it always lands last.
+    All updates use the REVIEW id as the stable notification tag.
+
+    NOTE: conditions must not reference automation-level variables that a
+    variables step later updates (HA renders those with their run-start values
+    in conditions) - derived flags are computed into sequence-only variables
+    instead (genai_has_content).
+
+    Notifications are sent to the NOTIFY SERVICE names you select (e.g.
+    notify.mobile_app_pixel_9_pro_xl or notify.all_phones) with the full rich
+    payload (image, tag, action buttons, channel, sound).
+    Requires the Frigate integration (MQTT 'frigate/reviews') and the HA
+    companion app.
+
+    v16 changes: the 'Final GIF preview source' choice was removed - the
+    event-end GIF is now always the triggering detection's own
+    event_preview.gif. Added 'Notification Icon (Optional - Android)'
+    (notification_icon): the Android status-bar icon can be a fixed 'mdi:'
+    name or a template, and defaults to an icon matching the detected object
+    (person, cat, dog, car, package, ...).
+  domain: automation
+  input:
+    camera:
+      name: Cameras
+      description: >-
+        One or more Frigate camera entities. The raw Frigate camera name is
+        resolved automatically from each entity (attribute 'camera_name').
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: camera
+    notify_targets:
+      name: Notification targets (notify SERVICES)
+      description: >-
+        Pick the notify SERVICE names to receive notifications - or type your
+        own. Use the service name (Settings > Devices & Services > device >
+        shows as notify.mobile_app_...), NOT the entity ID. Options currently
+        on this instance: notify.mobile_app_pixel_9_pro_xl,
+        notify.mobile_app_samsung_s25, notify.all_phones.
+      default: []
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          mode: dropdown
+          options:
+            - notify.all_phones
+            - notify.mobile_app_pixel_9_pro_xl
+            - notify.mobile_app_samsung_s25
+    review_severity:
+      name: Trigger on (severity)
+      description: >-
+        Which Frigate review severities should trigger the initial
+        notification. Note that a review often STARTS as 'detection' and is
+        escalated to 'alert' when an object enters an alert zone - with only
+        'alert' selected the notification waits for that escalation.
+      default:
+        - alert
+        - detection
+      selector:
+        select:
+          multiple: true
+          mode: dropdown
+          options:
+            - label: Alerts
+              value: alert
+            - label: Detections
+              value: detection
+    channel_name:
+      name: Android notification channel (optional)
+      description: >-
+        Channel name shown/created on Android. Leave blank to use
+        '<Camera> Detection' (e.g. "Garage Detection"). Changing the name
+        later creates a new channel on the phone; delete the old one in
+        Android's app notification settings.
+      default: ""
+      selector:
+        text:
+    cooldown:
+      name: Cooldown between new events (seconds)
+      default: 90
+      selector:
+        number:
+          min: 0
+          max: 900
+          step: 5
+          mode: box
+    wait_timeout:
+      name: Max wait between review updates (minutes)
+      description: >-
+        Overall ceiling for how long the main run keeps listening for review
+        updates (event end, sub-label) after the initial notification.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 15
+          mode: box
+    genai_timeout:
+      name: Keep the main run listening after event end (seconds)
+      description: >-
+        For compatibility; not used for AI delivery anymore.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 5
+          mode: box
+    genai_send_delay:
+      name: Delay before AI re-assertion (seconds)
+      description: >-
+        Safety-net re-assertion of the AI title/summary, sent this many seconds
+        after Frigate publishes the genai message. In the common case the AI
+        title already arrives WITH the event-end GIF update, so this only
+        matters for late summaries. Keep at least ~5s longer than the
+        'Delay before GIF update'.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 5
+          mode: box
+    final_delay:
+      name: Delay before GIF update (seconds)
+      description: >-
+        Window at event end for the AI summary to arrive and ride along with
+        the GIF update; also gives Frigate time to finish writing the GIF.
+        0 sends immediately.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          mode: box
+    update_sub_label:
+      name: Update notification when sub-label changes
+      default: true
+      selector:
+        boolean:
+    final_update:
+      name: Send GIF update on event end
+      default: true
+      selector:
+        boolean:
+    alert_once:
+      name: Updates are silent (alert once)
+      default: true
+      selector:
+        boolean:
+    sound:
+      name: Notification sound (optional)
+      description: >-
+        Sound for the first (audible) notification. Leave 'default' for the
+        platform default. iOS supports a named sound file.
+      default: "default"
+      selector:
+        text:
+    notification_icon:
+      name: Notification Icon (Optional - Android)
+      description: >-
+        Change the icon that displays on the notification (Android status-bar
+        icon). You can enter a single icon or create a template like the
+        example given in the dropdown. You must include 'mdi:' in the icon
+        name. The default template shows a car when a car is detected, a
+        person for a person, a cat for a cat, etc.
+      default: >-
+        {% set l = label | default('') %}mdi:{{ 'account' if 'Person' in l else
+        'cat' if 'Cat' in l else 'dog' if 'Dog' in l else 'car' if 'Car' in l
+        else 'package-variant' if ('Package' in l or 'Amazon' in l) else 'cctv' }}
+      selector:
+        select:
+          custom_value: true
+          multiple: false
+          sort: false
+          options:
+            - mdi:cctv
+            - mdi:account
+            - >-
+              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Cat' in label
+              else 'dog' if 'Dog' in label else 'car' if 'Car' in label else
+              'cctv' }}
+    click_action:
+      name: Click action (Frigate panel path)
+      default: /ccab4aaf_frigate-proxy/dashboard
+      selector:
+        text:
+    base_url:
+      name: Base URL (optional)
+      description: >-
+        External URL used to build snapshot/clip links. Leave blank to use
+        the mobile app's default Home Assistant URL.
+      default: ""
+      selector:
+        text:
+    client_id:
+      name: Frigate client ID (optional)
+      description: Leave blank unless you run multiple Frigate instances.
+      default: ""
+      selector:
+        text:
+variables:
+  camera: !input camera
+  camera_raws: "{{ camera | map('state_attr', 'camera_name') | reject('none') | list }}"
+  review_severity: !input review_severity
+  channel_pref: !input channel_name
+  cooldown: !input cooldown
+  timeout: !input wait_timeout
+  genai_timeout: !input genai_timeout
+  genai_send_delay: !input genai_send_delay
+  final_delay: !input final_delay
+  update_sub_label: !input update_sub_label
+  final_update: !input final_update
+  alert_once: !input alert_once
+  sound: !input sound
+  click_action: !input click_action
+  input_base_url: !input base_url
+  base_url: "{{ input_base_url.rstrip('/') if input_base_url else '' }}"
+  client_id: !input client_id
+  genai_title: ""
+  genai_summary: ""
+  genai_done: false
+  sent_phase1: false
+  sent_gif: false
+  seen_end: false
+  end_seen_ts: 0
+  notify_targets: !input notify_targets
+triggers:
+  - trigger: mqtt
+    id: frigate-event
+    options:
+      topic: frigate/reviews
+      payload: "new"
+      value_template: "{{ value_json.get('type') }}"
+  - trigger: mqtt
+    id: genai-event
+    options:
+      topic: frigate/reviews
+      payload: "genai"
+      value_template: "{{ value_json.get('type') }}"
+  - trigger: event
+    event_type: mobile_app_notification_action
+    id: silence
+conditions:
+  - condition: or
+    conditions:
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: silence
+          - condition: template
+            value_template: "{{ trigger.event.data.get('action', '') == 'silence-' ~ this.entity_id }}"
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: frigate-event
+          - condition: template
+            value_template: "{{ trigger.payload_json.get('after', {}).get('camera') in camera_raws }}"
+          - condition: template
+            value_template: "{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() >= cooldown }}"
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: genai-event
+          - condition: template
+            value_template: "{{ trigger.payload_json.get('after', {}).get('camera') in camera_raws }}"
+actions:
+  - choose:
+      - alias: Silence for 30 minutes
+        conditions:
+          - condition: trigger
+            id: silence
+        sequence:
+          - action: automation.turn_off
+            target:
+              entity_id: "{{ this.entity_id }}"
+            data:
+              stop_actions: false
+          - delay:
+              minutes: 30
+          - action: automation.turn_on
+            target:
+              entity_id: "{{ this.entity_id }}"
+      - alias: GenAI Summary Update
+        conditions:
+          - condition: trigger
+            id: genai-event
+        sequence:
+          - variables:
+              event: "{{ trigger.payload_json }}"
+              data: "{{ event.get('after', {}).get('data', {}) }}"
+              detections: "{{ data.get('detections', []) }}"
+              review_id: "{{ event.get('after', {}).get('id', '') }}"
+              id: "{{ detections[0] if detections else review_id }}"
+              camera_name: "{{ event.get('after', {}).get('camera', '') }}"
+              ended: "{{ (event.get('after', {}).get('end_time')) is not none }}"
+              metadata: "{{ data.get('metadata') or {} }}"
+              genai_title: "{{ metadata.get('title', '') }}"
+              genai_summary: "{{ metadata.get('shortSummary', '') }}"
+              genai_has_content: "{{ (metadata.get('title', '') or metadata.get('shortSummary', '')) | length > 0 }}"
+              notification_channel: "{{ channel_pref if channel_pref else ((camera_name ~ ' Detection') if camera_name else 'Frigate Detection') }}"
+              objects: "{{ data.get('objects', []) }}"
+              sub_labels: "{{ data.get('sub_labels', []) }}"
+              label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
+              notification_icon: !input notification_icon
+              attachment_url: "{{ (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/event_preview.gif') if ended else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1') }}"
+              attachment_type: "{{ 'gif' if ended else 'jpeg' }}"
+          - if:
+              - "{{ genai_has_content }}"
+            then:
+              - delay:
+                  seconds: "{{ genai_send_delay }}"
+              - repeat:
+                  for_each: "{{ notify_targets }}"
+                  sequence:
+                    - action: "{{ repeat.item }}"
+                      continue_on_error: true
+                      data:
+                        title: "{{ genai_title }}"
+                        message: "{{ genai_summary if genai_summary else '' }}"
+                        data:
+                          tag: "{{ review_id }}"
+                          group: "{{ camera_name }}-frigate-notification"
+                          channel: "{{ notification_channel }}"
+                          clickAction: "{{ click_action }}"
+                          notification_icon: "{{ notification_icon }}"
+                          image: "{{ attachment_url }}"
+                          attachment:
+                            url: "{{ attachment_url }}"
+                            content-type: "{{ attachment_type }}"
+                          ttl: 0
+                          priority: high
+                          alert_once: "{{ alert_once }}"
+                          actions:
+                            - action: URI
+                              title: Clip
+                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                            - action: URI
+                              title: Snapshot
+                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
+                            - action: "silence-{{ this.entity_id }}"
+                              title: Silence
+      - alias: Frigate Event
+        conditions:
+          - condition: trigger
+            id: frigate-event
+        sequence:
+          - variables:
+              event: "{{ trigger.payload_json }}"
+              evt_type: "{{ event.get('type', '') }}"
+              data: "{{ event.get('after', {}).get('data', {}) }}"
+              detections: "{{ data.get('detections', []) }}"
+              review_id: "{{ event.get('after', {}).get('id', '') }}"
+              id: "{{ detections[0] if detections else review_id }}"
+              objects: "{{ data.get('objects', []) }}"
+              sub_labels: "{{ data.get('sub_labels', []) }}"
+              camera_name: "{{ event.get('after', {}).get('camera', '') }}"
+              notification_channel: "{{ channel_pref if channel_pref else ((camera_name ~ ' Detection') if camera_name else 'Frigate Detection') }}"
+              label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
+              notification_icon: !input notification_icon
+              message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
+              tag: "{{ review_id }}"
+              severity_satisfied: "{{ ((event.get('after', {}).get('severity')) or 'detection') in review_severity }}"
+              attachment_url: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg?bbox=1"
+              attachment_type: jpeg
+          - if:
+              - "{{ severity_satisfied }}"
+            then:
+              - repeat:
+                  for_each: "{{ notify_targets }}"
+                  sequence:
+                    - action: "{{ repeat.item }}"
+                      continue_on_error: true
+                      data:
+                        title: ""
+                        message: "{{ message }}"
+                        data:
+                          tag: "{{ tag }}"
+                          group: "{{ camera_name }}-frigate-notification"
+                          channel: "{{ notification_channel }}"
+                          clickAction: "{{ click_action }}"
+                          notification_icon: "{{ notification_icon }}"
+                          image: "{{ attachment_url }}"
+                          attachment:
+                            url: "{{ attachment_url }}"
+                            content-type: "{{ attachment_type }}"
+                          ttl: 0
+                          priority: high
+                          push:
+                            sound:
+                              name: "{{ sound }}"
+                              volume: 100
+                              critical: false
+                          actions:
+                            - action: URI
+                              title: Clip
+                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                            - action: URI
+                              title: Snapshot
+                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
+                            - action: "silence-{{ this.entity_id }}"
+                              title: Silence
+              - variables:
+                  sent_phase1: true
+          - repeat:
+              sequence:
+                - wait_for_trigger:
+                    - trigger: mqtt
+                      topic: frigate/reviews
+                      payload: "{{ review_id }}"
+                      value_template: "{{ value_json['after']['id'] }}"
+                  timeout:
+                    minutes: "{{ timeout }}"
+                  continue_on_timeout: true
+                - variables:
+                    event: "{{ wait.trigger.payload_json | default({}) }}"
+                    evt_type: "{{ event.get('type', '') }}"
+                    timed_out: "{{ wait.trigger is none }}"
+                    seen_end: "{{ (seen_end | default(false)) or evt_type == 'end' }}"
+                    end_seen_ts: "{{ now().timestamp() if evt_type == 'end' else (end_seen_ts | default(0)) }}"
+                    severity_satisfied: "{{ ((event.get('after', {}).get('severity')) or 'detection') in review_severity }}"
+                    camera_name: "{{ event.get('after', {}).get('camera', camera_name) }}"
+                    notification_channel: "{{ channel_pref if channel_pref else ((camera_name ~ ' Detection') if camera_name else 'Frigate Detection') }}"
+                    before_sub_labels: "{{ sub_labels | default([]) }}"
+                    sub_labels: "{{ event.get('after', {}).get('data', {}).get('sub_labels', []) }}"
+                    sub_label_updated: "{{ update_sub_label and evt_type != 'genai' and sub_labels != before_sub_labels }}"
+                    objects: "{{ event.get('after', {}).get('data', {}).get('objects', []) }}"
+                    label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
+                    message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
+                    loop_title: "{{ (event.get('after', {}).get('data', {}).get('metadata') or {}).get('title', '') if evt_type == 'genai' else '' }}"
+                    loop_summary: "{{ (event.get('after', {}).get('data', {}).get('metadata') or {}).get('shortSummary', '') if evt_type == 'genai' else '' }}"
+                    genai_done: "{{ (genai_done | default(false)) or evt_type == 'genai' }}"
+                    genai_title: "{{ loop_title if loop_title else genai_title | default('') }}"
+                    genai_summary: "{{ loop_summary if loop_summary else genai_summary | default('') }}"
+                    attachment_url: "{{ ((base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/event_preview.gif') if (seen_end and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1')) }}"
+                    attachment_type: "{{ 'gif' if (seen_end and final_update) else 'jpeg' }}"
+                - if:
+                    - "{{ not (sent_phase1 | default(false)) and severity_satisfied }}"
+                  then:
+                    - repeat:
+                        for_each: "{{ notify_targets }}"
+                        sequence:
+                          - action: "{{ repeat.item }}"
+                            continue_on_error: true
+                            data:
+                              title: ""
+                              message: "{{ message }}"
+                              data:
+                                tag: "{{ tag }}"
+                                group: "{{ camera_name }}-frigate-notification"
+                                channel: "{{ notification_channel }}"
+                                clickAction: "{{ click_action }}"
+                                notification_icon: "{{ notification_icon }}"
+                                image: "{{ attachment_url }}"
+                                attachment:
+                                  url: "{{ attachment_url }}"
+                                  content-type: "{{ attachment_type }}"
+                                ttl: 0
+                                priority: high
+                                push:
+                                  sound:
+                                    name: "{{ sound }}"
+                                    volume: 100
+                                    critical: false
+                                actions:
+                                  - action: URI
+                                    title: Clip
+                                    uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                                  - action: URI
+                                    title: Snapshot
+                                    uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
+                                  - action: "silence-{{ this.entity_id }}"
+                                    title: Silence
+                    - variables:
+                        sent_phase1: true
+                        sent_gif: "{{ seen_end }}"
+                - if:
+                    - "{{ sent_phase1 | default(false) }}"
+                  then:
+                    - if:
+                        - "{{ evt_type == 'end' and final_update and not (sent_gif | default(false)) }}"
+                      then:
+                        - wait_for_trigger:
+                            - trigger: mqtt
+                              topic: frigate/reviews
+                              payload: "{{ review_id }}"
+                              value_template: "{{ value_json['after']['id'] if value_json.get('type') == 'genai' else '' }}"
+                          timeout:
+                            seconds: "{{ final_delay }}"
+                          continue_on_timeout: true
+                        - variables:
+                            genai_evt: "{{ wait.trigger.payload_json if wait.trigger is not none else {} }}"
+                            got_genai: "{{ genai_evt.get('type', '') == 'genai' }}"
+                            genai_meta: "{{ (genai_evt.get('after', {}).get('data', {}) or {}).get('metadata') or {} }}"
+                            genai_done: "{{ got_genai or (genai_done | default(false)) }}"
+                            genai_title: "{{ genai_meta.get('title', '') if got_genai else (genai_title | default('')) }}"
+                            genai_summary: "{{ genai_meta.get('shortSummary', '') if got_genai else (genai_summary | default('')) }}"
+                            gif_wait_left: "{{ [final_delay - (now().timestamp() - (end_seen_ts | default(0))), 0] | max }}"
+                        - delay:
+                            seconds: "{{ gif_wait_left }}"
+                        - repeat:
+                            for_each: "{{ notify_targets }}"
+                            sequence:
+                              - action: "{{ repeat.item }}"
+                                continue_on_error: true
+                                data:
+                                  title: "{{ genai_title if (genai_done | default(false)) else '' }}"
+                                  message: "{{ genai_summary if genai_summary else message }}"
+                                  data:
+                                    tag: "{{ tag }}"
+                                    group: "{{ camera_name }}-frigate-notification"
+                                    channel: "{{ notification_channel }}"
+                                    clickAction: "{{ click_action }}"
+                                    notification_icon: "{{ notification_icon }}"
+                                    image: "{{ attachment_url }}"
+                                    attachment:
+                                      url: "{{ attachment_url }}"
+                                      content-type: "{{ attachment_type }}"
+                                    ttl: 0
+                                    priority: high
+                                    alert_once: "{{ alert_once }}"
+                                    actions:
+                                      - action: URI
+                                        title: Clip
+                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                                      - action: URI
+                                        title: Snapshot
+                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
+                                      - action: "silence-{{ this.entity_id }}"
+                                        title: Silence
+                        - variables:
+                            sent_gif: true
+                    - if:
+                        - "{{ sub_label_updated }}"
+                      then:
+                        - repeat:
+                            for_each: "{{ notify_targets }}"
+                            sequence:
+                              - action: "{{ repeat.item }}"
+                                continue_on_error: true
+                                data:
+                                  title: "{{ genai_title if (genai_done | default(false)) else '' }}"
+                                  message: "{{ genai_summary if genai_summary else message }}"
+                                  data:
+                                    tag: "{{ tag }}"
+                                    group: "{{ camera_name }}-frigate-notification"
+                                    channel: "{{ notification_channel }}"
+                                    clickAction: "{{ click_action }}"
+                                    notification_icon: "{{ notification_icon }}"
+                                    image: "{{ attachment_url }}"
+                                    attachment:
+                                      url: "{{ attachment_url }}"
+                                      content-type: "{{ attachment_type }}"
+                                    ttl: 0
+                                    priority: high
+                                    alert_once: "{{ alert_once }}"
+                                    actions:
+                                      - action: URI
+                                        title: Clip
+                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                                      - action: URI
+                                        title: Snapshot
+                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
+                                      - action: "silence-{{ this.entity_id }}"
+                                        title: Silence
+                - variables:
+                    exit_loop: "{{ timed_out or (seen_end and ((sent_gif | default(false)) or not final_update)) }}"
+              until:
+                - condition: template
+                  value_template: "{{ exit_loop }}"
+mode: parallel
