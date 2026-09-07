@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-06)
+  name: Frigate Review Notification (2026-09-07)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -39,6 +39,19 @@ blueprint:
     (notification_icon): the Android status-bar icon can be a fixed 'mdi:'
     name or a template, and defaults to an icon matching the detected object
     (person, cat, dog, car, package, ...).
+
+    2026-09-07 changes: the main run no longer lingers for the full timeout
+    after a review ends when Phase 1 was never sent (only relevant for
+    severity-mismatched reviews, e.g. detection reviews on alert-only
+    automations); camera conditions now also require a resolvable camera list
+    (camera_raws) so a renamed/missing camera entity cannot silently suppress
+    notifications; removed the unused 'genai_timeout' input and the redundant
+    loop-level GenAI capture - AI summaries are delivered by the end-window
+    listener and the delayed re-assertion safety net instead. Media URLs are
+    unchanged and verified correct: the HA integration notification proxy
+    (snapshot.jpg / event_preview.gif / clip.mp4) is event-keyed, so media uses
+    the triggering event id (data.detections[0]); the review id remains the
+    notification tag.
   domain: automation
   input:
     camera:
@@ -117,17 +130,6 @@ blueprint:
         number:
           min: 1
           max: 15
-          mode: box
-    genai_timeout:
-      name: Keep the main run listening after event end (seconds)
-      description: >-
-        For compatibility; not used for AI delivery anymore.
-      default: 30
-      selector:
-        number:
-          min: 0
-          max: 300
-          step: 5
           mode: box
     genai_send_delay:
       name: Delay before AI re-assertion (seconds)
@@ -229,7 +231,6 @@ variables:
   channel_pref: !input channel_name
   cooldown: !input cooldown
   timeout: !input wait_timeout
-  genai_timeout: !input genai_timeout
   genai_send_delay: !input genai_send_delay
   final_delay: !input final_delay
   update_sub_label: !input update_sub_label
@@ -278,6 +279,8 @@ conditions:
           - condition: trigger
             id: frigate-event
           - condition: template
+            value_template: "{{ camera_raws | length > 0 }}"
+          - condition: template
             value_template: "{{ trigger.payload_json.get('after', {}).get('camera') in camera_raws }}"
           - condition: template
             value_template: "{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() >= cooldown }}"
@@ -285,6 +288,8 @@ conditions:
         conditions:
           - condition: trigger
             id: genai-event
+          - condition: template
+            value_template: "{{ camera_raws | length > 0 }}"
           - condition: template
             value_template: "{{ trigger.payload_json.get('after', {}).get('camera') in camera_raws }}"
 actions:
@@ -370,7 +375,6 @@ actions:
         sequence:
           - variables:
               event: "{{ trigger.payload_json }}"
-              evt_type: "{{ event.get('type', '') }}"
               data: "{{ event.get('after', {}).get('data', {}) }}"
               detections: "{{ data.get('detections', []) }}"
               review_id: "{{ event.get('after', {}).get('id', '') }}"
@@ -450,11 +454,6 @@ actions:
                     objects: "{{ event.get('after', {}).get('data', {}).get('objects', []) }}"
                     label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
                     message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
-                    loop_title: "{{ (event.get('after', {}).get('data', {}).get('metadata') or {}).get('title', '') if evt_type == 'genai' else '' }}"
-                    loop_summary: "{{ (event.get('after', {}).get('data', {}).get('metadata') or {}).get('shortSummary', '') if evt_type == 'genai' else '' }}"
-                    genai_done: "{{ (genai_done | default(false)) or evt_type == 'genai' }}"
-                    genai_title: "{{ loop_title if loop_title else genai_title | default('') }}"
-                    genai_summary: "{{ loop_summary if loop_summary else genai_summary | default('') }}"
                     attachment_url: "{{ ((base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/event_preview.gif') if (seen_end and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1')) }}"
                     attachment_type: "{{ 'gif' if (seen_end and final_update) else 'jpeg' }}"
                 - if:
@@ -587,7 +586,7 @@ actions:
                                       - action: "silence-{{ this.entity_id }}"
                                         title: Silence
                 - variables:
-                    exit_loop: "{{ timed_out or (seen_end and ((sent_gif | default(false)) or not final_update)) }}"
+                    exit_loop: "{{ timed_out or (seen_end and ((sent_gif | default(false)) or not final_update or not (sent_phase1 | default(false)))) }}"
               until:
                 - condition: template
                   value_template: "{{ exit_loop }}"
