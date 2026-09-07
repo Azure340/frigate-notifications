@@ -2,7 +2,7 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** 2026-09-07 (date-based versioning — the version is the release date)
+- **Version:** 2026-09-07b (date-based versioning — the version is the release date)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
 - **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
@@ -23,7 +23,13 @@ The notification proxy (`frigate-hass-integration` `views.py`) is **event-keyed*
 - `…/api/frigate/notifications/{event_id}/event_preview.gif` → `api/events/{event_id}/preview.gif`
 - `…/api/frigate/notifications/{event_id}/{camera}/clip.mp4` → `api/events/{event_id}/clip.mp4`
 
-So snapshots/GIF/clip links use the **triggering event id** (`data.detections[0]`), while the notification **tag** (update identity) uses the **review id**. Do not swap these — a review id in a media path 404s.
+So snapshots/GIF/clip links use the **triggering event id**, while the notification **tag** (update identity) uses the **review id**. Do not swap these — a review id in a media path 404s.
+
+**Which event id?** The earliest detection in the review — resolved as `data.detections | min` (event ids string-compare by their epoch prefix, so the minimum is the oldest activation). This is deliberate: a review's detection list can grow or reorder between the `new`/`end` messages and the `genai` message, so the first list entry is not stable across runs. The `min` resolution makes every run of the same review — Phase 1, end-GIF update, and GenAI safety net — reference the **same** event, so the snapshot, GIF and clip are identical across all updates.
+
+## Changes in 2026-09-07b
+
+- **Media id pinned per review.** `id` is now `data.detections | min` (earliest/triggering detection) instead of the first list entry (`detections[0]`). Previously the GenAI safety-net run could pick a different detection when the review's detection list grew, so the two AI updates could reference different GIFs. Now every update of the same review uses the identical event id.
 
 ## Changes in 2026-09-07
 
@@ -31,7 +37,6 @@ So snapshots/GIF/clip links use the **triggering event id** (`data.detections[0]
 - **Camera guard:** conditions now require a resolvable camera list (`camera_raws`), so a renamed/missing camera entity can't silently leave the automation blind (no traces, no errors).
 - **Removed unused `genai_timeout` input** (was "for compatibility"; nothing referenced it).
 - **Removed redundant loop-level GenAI capture.** AI summaries are delivered by the end-window listener (glued to the GIF) and the delayed re-assertion safety net — the mid-loop capture was dead weight. Edge case: if a GenAI summary is published *mid-review* (before end) outside the end-window, it now arrives via the safety-net update instead of riding the GIF update.
-- **Media URLs unchanged** — verified correct against the integration proxy (see above).
 
 ## Changes in 2026-09-06
 
@@ -46,6 +51,7 @@ So snapshots/GIF/clip links use the **triggering event id** (`data.detections[0]
 
 ## History
 
+- **2026-09-07b:** Media id pinned per review (`data.detections | min`) so snapshot/GIF/clip are identical across Phase-1, end-GIF and GenAI safety-net updates.
 - **2026-09-07:** Exit-loop fix (no lingering after end when Phase 1 wasn't sent); camera_raws guard; removed `genai_timeout` and redundant loop GenAI capture; media URL contract documented.
 - **2026-09-06:** Event GIF hardcoded; Android notification icon added; switched to date-based versioning.
 - **Earlier (Sep 2026):** GenAI delivery timing fixes — AI title arrives with the end-GIF update; delayed re-assertion kept as a safety net.
