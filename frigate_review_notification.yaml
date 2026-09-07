@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-07)
+  name: Frigate Review Notification (2026-09-07b)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -52,6 +52,16 @@ blueprint:
     (snapshot.jpg / event_preview.gif / clip.mp4) is event-keyed, so media uses
     the triggering event id (data.detections[0]); the review id remains the
     notification tag.
+
+    2026-09-07b changes: media URLs are now pinned to ONE event id per review -
+    the earliest ('triggering') detection, resolved as 'data.detections | min'
+    instead of the first list entry. The HA notification proxy is event-keyed,
+    and a review's detection list can grow or reorder between the messages
+    (the genai message carries more detections than the original 'new'
+    message), so detections[0] could differ between the main run and the GenAI
+    safety-net run and the two updates would reference different GIFs. With the
+    min resolution every run of the same review picks the same event, so
+    snapshot, GIF and clip are identical across all updates.
   domain: automation
   input:
     camera:
@@ -319,7 +329,7 @@ actions:
               data: "{{ event.get('after', {}).get('data', {}) }}"
               detections: "{{ data.get('detections', []) }}"
               review_id: "{{ event.get('after', {}).get('id', '') }}"
-              id: "{{ detections[0] if detections else review_id }}"
+              id: "{{ (detections | min) if detections else review_id }}"
               camera_name: "{{ event.get('after', {}).get('camera', '') }}"
               ended: "{{ (event.get('after', {}).get('end_time')) is not none }}"
               metadata: "{{ data.get('metadata') or {} }}"
@@ -378,7 +388,7 @@ actions:
               data: "{{ event.get('after', {}).get('data', {}) }}"
               detections: "{{ data.get('detections', []) }}"
               review_id: "{{ event.get('after', {}).get('id', '') }}"
-              id: "{{ detections[0] if detections else review_id }}"
+              id: "{{ (detections | min) if detections else review_id }}"
               objects: "{{ data.get('objects', []) }}"
               sub_labels: "{{ data.get('sub_labels', []) }}"
               camera_name: "{{ event.get('after', {}).get('camera', '') }}"
