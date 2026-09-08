@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-07b)
+  name: Frigate Review Notification (2026-09-08)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -62,6 +62,20 @@ blueprint:
     safety-net run and the two updates would reference different GIFs. With the
     min resolution every run of the same review picks the same event, so
     snapshot, GIF and clip are identical across all updates.
+
+    2026-09-08 changes: fixed stale media anchoring and gated the GenAI safety
+    net. Media is now pinned to the review's MOST RECENT detection
+    ('data.detections | max' instead of 'min'): a review whose detections span
+    a long period (e.g. a car parked in view for hours) previously anchored
+    snapshot, GIF and clip to the FIRST event, so end/departure notifications
+    showed the arrival media. The GenAI safety-net run now also requires the
+    review's severity to match the selected 'Trigger on (severity)' AND the
+    review to be less than 15 minutes past its end (or start, if still open;
+    hardcoded 900s), so stale reviews can no longer resurrect as new
+    notifications hours later and detection-only reviews no longer notify on
+    alert-only automations. Default 'Delay before GIF update' raised from 5s to
+    15s to give Frigate time to finish generating the event preview before the
+    phone fetches it.
   domain: automation
   input:
     camera:
@@ -162,7 +176,7 @@ blueprint:
         Window at event end for the AI summary to arrive and ride along with
         the GIF update; also gives Frigate time to finish writing the GIF.
         0 sends immediately.
-      default: 5
+      default: 15
       selector:
         number:
           min: 0
@@ -201,7 +215,9 @@ blueprint:
         person for a person, a cat for a cat, etc.
       default: >-
         {% set l = label | default('') %}mdi:{{ 'account' if 'Person' in l else
-        'cat' if 'Cat' in l else 'dog' if 'Dog' in l else 'car' if 'Car' in l
+        'cat' if 'Cat' in l else
+        'dog' if 'Dog' in l else
+        'car' if 'Car' in l
         else 'package-variant' if ('Package' in l or 'Amazon' in l) else 'cctv' }}
       selector:
         select:
@@ -212,8 +228,9 @@ blueprint:
             - mdi:cctv
             - mdi:account
             - >-
-              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Cat' in label
-              else 'dog' if 'Dog' in label else 'car' if 'Car' in label else
+              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Cat' in label else
+              'dog' if 'Dog' in label else
+              'car' if 'Car' in label else
               'cctv' }}
     click_action:
       name: Click action (Frigate panel path)
@@ -233,7 +250,7 @@ blueprint:
       description: Leave blank unless you run multiple Frigate instances.
       default: ""
       selector:
-        text:
+        text
 variables:
   camera: !input camera
   camera_raws: "{{ camera | map('state_attr', 'camera_name') | reject('none') | list }}"
@@ -323,13 +340,17 @@ actions:
         conditions:
           - condition: trigger
             id: genai-event
+          - condition: template
+            value_template: "{{ ((trigger.payload_json.get('after', {}).get('severity')) or 'detection') in review_severity }}"
+          - condition: template
+            value_template: "{{ (now().timestamp() - ((trigger.payload_json.get('after', {}).get('end_time')) or trigger.payload_json.get('after', {}).get('start_time') or 0)) < 900 }}"
         sequence:
           - variables:
               event: "{{ trigger.payload_json }}"
               data: "{{ event.get('after', {}).get('data', {}) }}"
               detections: "{{ data.get('detections', []) }}"
               review_id: "{{ event.get('after', {}).get('id', '') }}"
-              id: "{{ (detections | min) if detections else review_id }}"
+              id: "{{ (detections | max) if detections else review_id }}"
               camera_name: "{{ event.get('after', {}).get('camera', '') }}"
               ended: "{{ (event.get('after', {}).get('end_time')) is not none }}"
               metadata: "{{ data.get('metadata') or {} }}"
@@ -388,7 +409,7 @@ actions:
               data: "{{ event.get('after', {}).get('data', {}) }}"
               detections: "{{ data.get('detections', []) }}"
               review_id: "{{ event.get('after', {}).get('id', '') }}"
-              id: "{{ (detections | min) if detections else review_id }}"
+              id: "{{ (detections | max) if detections else review_id }}"
               objects: "{{ data.get('objects', []) }}"
               sub_labels: "{{ data.get('sub_labels', []) }}"
               camera_name: "{{ event.get('after', {}).get('camera', '') }}"
