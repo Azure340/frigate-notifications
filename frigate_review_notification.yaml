@@ -250,7 +250,7 @@ blueprint:
       description: Leave blank unless you run multiple Frigate instances.
       default: ""
       selector:
-        text
+        text:
 variables:
   camera: !input camera
   camera_raws: "{{ camera | map('state_attr', 'camera_name') | reject('none') | list }}"
