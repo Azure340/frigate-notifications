@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-09)
+  name: Frigate Review Notification (2026-09-15)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -67,8 +67,8 @@ blueprint:
     net. Media is now pinned to the review's MOST RECENT detection
     ('data.detections | max' instead of 'min'): a review whose detections span
     a long period (e.g. a car parked in view for hours) previously anchored
-    snapshot, GIF and clip to the FIRST event, so end/departure notifications
-    showed the arrival media. The GenAI safety-net run now also requires the
+    snapshot, GIF and clip to the FIRST event, so end/departure updates
+    rendered the arrival. The GenAI safety-net run now also requires the
     review's severity to match the selected 'Trigger on (severity)' AND the
     review to be less than 15 minutes past its end (or start, if still open;
     hardcoded 900s), so stale reviews can no longer resurrect as new
@@ -89,6 +89,19 @@ blueprint:
     The main run's wait-loop now also re-resolves the media id from each
     incoming payload's detections ('max'), so late updates can reference newer
     events. Phase-1 media (immediate snapshot) is unchanged.
+
+    2026-09-15 changes: the 'Silence' action button no longer re-enables the
+    automation unconditionally. Added two optional inputs: 'Silence re-enable
+    guard entity' (silence_reenable_entity) and 'Silence re-enable guard
+    state' (silence_reenable_state). When the guard entity is set, the
+    re-enable after the 30-minute delay only happens if the guard entity's
+    state equals the guard state AT THE MOMENT the delay expires (single
+    check, no re-check loop) - e.g. binary_sensor.household_status with 'off'
+    (away) for a scene-managed automation, so a Silence that expires while
+    anyone is home leaves the automation off until the away scene turns it
+    back on. Guard blank = previous behavior (always re-enable). Existing
+    automations that do not set the guard keep the old behavior after a
+    blueprint re-import.
   domain: automation
   input:
     camera:
@@ -264,6 +277,28 @@ blueprint:
       default: ""
       selector:
         text:
+    silence_reenable_entity:
+      name: Silence re-enable guard entity (optional)
+      description: >-
+        If set, the automation is only turned back on after the 30-minute
+        Silence delay when this entity's state equals the guard state below,
+        checked once at the moment the delay expires. Typical use for a
+        scene-managed automation: binary_sensor.household_status with guard
+        state 'off' (away). Leave blank for the previous behavior (always
+        re-enable after 30 minutes).
+      default: ""
+      selector:
+        entity:
+          multiple: false
+    silence_reenable_state:
+      name: Silence re-enable guard state
+      description: >-
+        State the guard entity must be in to permit the re-enable ('off' =
+        nobody home for a household binary sensor). Ignored when no guard
+        entity is set.
+      default: "off"
+      selector:
+        text:
 variables:
   camera: !input camera
   camera_raws: "{{ camera | map('state_attr', 'camera_name') | reject('none') | list }}"
@@ -346,9 +381,13 @@ actions:
               stop_actions: false
           - delay:
               minutes: 30
-          - action: automation.turn_on
-            target:
-              entity_id: "{{ this.entity_id }}"
+          - if:
+              - condition: template
+                value_template: "{{ not silence_reenable_entity or states(silence_reenable_entity) == silence_reenable_state }}"
+            then:
+              - action: automation.turn_on
+                target:
+                  entity_id: "{{ this.entity_id }}"
       - alias: GenAI Summary Update
         conditions:
           - condition: trigger
