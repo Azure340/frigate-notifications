@@ -2,7 +2,7 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** 2026-09-15 (date-based versioning — the version is the release date)
+- **Version:** 2026-09-18 (date-based versioning — the version is the release date)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
 - **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
@@ -26,6 +26,18 @@ The notification proxy (`frigate-hass-integration` `views.py`) is **event-keyed*
 So snapshots/GIF/clip links use the **triggering event id**, while the notification **tag** (update identity) uses the **review id**. Do not swap these — a review id in a media path 404s.
 
 **Which event id?** The MOST RECENT detection in the review — resolved as `data.detections | max` (event ids string-compare by their epoch prefix, so the maximum is the newest activation). This is deliberate: for long-lived reviews (an object staying in view, e.g. a car parked for hours) the departure review bundles the still-open old event id alongside newer ones, and anchoring media to the oldest event made end/departure updates show the arrival. A review's detection list can also grow or reorder between the `new`/`end`/`genai` messages, so the `max` resolution keeps snapshot, GIF and clip consistent across every update of the same review (Phase 1, end-GIF update, and GenAI safety net).
+
+## Changes in 2026-09-18
+
+- **The Silence re-enable guard now actually works (bugfix).** The presence guard added in 2026-09-15 never took effect. The two inputs were declared under `blueprint.input` but were never mapped into the blueprint's top-level `variables:` block, so the guard template referenced **undefined Jinja variables** (`silence_reenable_entity` / `silence_reenable_state`). Automations render undefined variables non-strictly: HA logs `Template variable warning: 'silence_reenable_entity' is undefined when rendering …` and treats the value as falsy — so `not silence_reenable_entity` evaluated **true**, the `or` short-circuited, and `automation.turn_on` ran unconditionally on every silence expiry. Net effect was exactly the pre-2026-09-15 behavior — a Silence that expired while everyone was home re-enabled the automation — plus a template warning in the log each time it happened.
+  - Both inputs are now mapped into `variables:`: `silence_reenable_entity: !input silence_reenable_entity` and `silence_reenable_state: !input silence_reenable_state`. Every other input was already mapped this way; only these two were missing, so no bare `!input`-derived name was in scope for the guard.
+  - The check no longer relies on undefined-value semantics (blank guard is handled explicitly instead of via a falsy undefined):
+    ```jinja
+    {{ silence_reenable_entity == '' or is_state(silence_reenable_entity, silence_reenable_state) }}
+    ```
+  - Blank guard = unchanged behavior (always re-enable after 30 minutes). A configured guard is now genuinely evaluated once, at the moment the delay expires.
+  - Why this slipped through the 2026-09-15 verification: anything that renders strictly (the template editor / Developer Tools) raises `UndefinedError` for these variables, while the automation path only logged a *warning* and carried on. A template test in isolation therefore can't prove the wiring — the only reliable check is the logbook/trace of a real silence expiry.
+  - Re-import the blueprint with **overwrite** (or reload automations after editing the installed file) so the existing automations pick up the fix.
 
 ## Changes in 2026-09-15
 
@@ -65,6 +77,7 @@ So snapshots/GIF/clip links use the **triggering event id**, while the notificat
 
 ## History
 
+- **2026-09-18:** Silence re-enable guard inputs wired into the blueprint's `variables:` block — they were declared but undefined, so the guard was a no-op and every silence expiry logged a template warning; the check is now `guard == '' or is_state(guard, state)`.
 - **2026-09-15:** Silence re-enable gated by an optional presence guard entity/state (single check at delay expiry; blank = previous behavior).
 - **2026-09-09:** Review-scoped preview GIF for short reviews (≤ 180 s); wait-loop re-resolves the media id per payload.
 - **2026-09-08:** Media pinned to the newest detection (`max`); GenAI safety-net severity/age gating; GIF delay default 15s.
