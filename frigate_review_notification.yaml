@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-15)
+  name: Frigate Review Notification (2026-09-18)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -102,6 +102,24 @@ blueprint:
     back on. Guard blank = previous behavior (always re-enable). Existing
     automations that do not set the guard keep the old behavior after a
     blueprint re-import.
+
+    2026-09-18 changes: the Silence re-enable guard added on 2026-09-15 did not
+    actually work - fixed. The two guard inputs were declared under
+    'blueprint.input' but were never mapped into the blueprint's top-level
+    'variables' block, so the guard template referenced undefined Jinja
+    variables (silence_reenable_entity / silence_reenable_state). Automations
+    render undefined variables non-strictly: HA logs 'Template variable
+    warning: <name> is undefined' and treats the value as falsy, so
+    'not silence_reenable_entity' evaluated TRUE and the automation.turn_on step
+    ran unconditionally on every silence expiry - exactly the pre-2026-09-15
+    behavior, plus a warning in the log each time. Both inputs are now mapped to
+    variables and the check no longer depends on undefined-value semantics:
+    '{{ silence_reenable_entity == '' or is_state(silence_reenable_entity,
+    silence_reenable_state) }}'. Blank guard = unchanged behavior (always
+    re-enable); a configured guard is now genuinely evaluated once at delay
+    expiry. Note that the template editor renders strictly, so the old template
+    raised there while the automation only logged a warning - which is why this
+    slipped past the 2026-09-15 verification.
   domain: automation
   input:
     camera:
@@ -324,6 +342,8 @@ variables:
   seen_end: false
   end_seen_ts: 0
   notify_targets: !input notify_targets
+  silence_reenable_entity: !input silence_reenable_entity
+  silence_reenable_state: !input silence_reenable_state
 triggers:
   - trigger: mqtt
     id: frigate-event
@@ -383,7 +403,8 @@ actions:
               minutes: 30
           - if:
               - condition: template
-                value_template: "{{ not silence_reenable_entity or states(silence_reenable_entity) == silence_reenable_state }}"
+                value_template: >-
+                  {{ silence_reenable_entity == '' or is_state(silence_reenable_entity, silence_reenable_state) }}
             then:
               - action: automation.turn_on
                 target:
