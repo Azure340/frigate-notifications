@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-18)
+  name: Frigate Review Notification (2026-09-24)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -120,6 +120,13 @@ blueprint:
     expiry. Note that the template editor renders strictly, so the old template
     raised there while the automation only logged a warning - which is why this
     slipped past the 2026-09-15 verification.
+
+    2026-09-24 changes: end-of-review and GenAI GIF updates now always use the
+    review-scoped preview ('review_preview.gif', keyed by review id), regardless
+    of review duration. This keeps the GIF tied to the same review as the
+    notification tag instead of selecting the newest event GIF, which is not
+    guaranteed to correspond to the review's announced object labels. Initial
+    snapshots and Clip/Snapshot action links remain event-keyed.
   domain: automation
   input:
     camera:
@@ -225,6 +232,7 @@ blueprint:
         number:
           min: 0
           max: 60
+          step: 1
           mode: box
     update_sub_label:
       name: Update notification when sub-label changes
@@ -272,7 +280,7 @@ blueprint:
             - mdi:cctv
             - mdi:account
             - >-
-              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Cat' in label else
+              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Dog' in label else
               'dog' if 'Dog' in label else
               'car' if 'Car' in label else
               'cctv' }}
@@ -426,9 +434,8 @@ actions:
               id: "{{ (detections | max) if detections else review_id }}"
               camera_name: "{{ event.get('after', {}).get('camera', '') }}"
               ended: "{{ (event.get('after', {}).get('end_time')) is not none }}"
-              review_short: "{{ (event.get('after', {}).get('end_time') is not none and ((event.get('after', {}).get('end_time') - event.get('after', {}).get('start_time', 0)) < 180)) }}"
-              gif_id: "{{ review_id if (ended and review_short) else id }}"
-              gif_file: "{{ 'review_preview.gif' if (ended and review_short) else 'event_preview.gif' }}"
+              gif_id: "{{ review_id }}"
+              gif_file: review_preview.gif
               metadata: "{{ data.get('metadata') or {} }}"
               genai_title: "{{ metadata.get('title', '') }}"
               genai_summary: "{{ metadata.get('shortSummary', '') }}"
@@ -561,9 +568,8 @@ actions:
                     objects: "{{ event.get('after', {}).get('data', {}).get('objects', []) }}"
                     detections: "{{ event.get('after', {}).get('data', {}).get('detections', []) }}"
                     id: "{{ (detections | max) if detections else id }}"
-                    review_short: "{{ (event.get('after', {}).get('end_time') is not none and ((event.get('after', {}).get('end_time') - event.get('after', {}).get('start_time', 0)) < 180)) }}"
-                    gif_id: "{{ review_id if review_short else id }}"
-                    gif_file: "{{ 'review_preview.gif' if review_short else 'event_preview.gif' }}"
+                    gif_id: "{{ review_id }}"
+                    gif_file: review_preview.gif
                     label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
                     message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
                     attachment_url: "{{ ((base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ gif_id ~ '/' ~ gif_file) if (seen_end and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1')) }}"
