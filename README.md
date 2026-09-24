@@ -2,7 +2,7 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** 2026-09-18 (date-based versioning — the version is the release date)
+- **Version:** 2026-09-24 (date-based versioning — the version is the release date)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
 - **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
@@ -10,22 +10,25 @@ A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
 - **Phase 1:** instant '<Label> detected' + snapshot (audible) as soon as a review's severity matches the selected boxes (`alert` / `detection`).
 - **Phase 2 (silent in-place updates, stable notification tag = review id):**
-  - Event end → swaps the snapshot for the preview GIF. The end update listens for the GenAI message during the delay window so the AI title/summary arrives together with the GIF.
+  - Event end → swaps the snapshot for the Frigate review-scoped preview GIF (`review_preview.gif`, keyed by the review id), regardless of review duration. The end update listens for the GenAI message during the delay window so the AI title/summary arrives together with the GIF.
   - Sub-label changes → refresh the message.
 - **GenAI safety net:** a dedicated MQTT trigger re-asserts the AI title/summary `genai_send_delay` seconds after Frigate publishes it (covers late summaries / HA restarts).
 - Configurable: notification icon, Android channel, sound, cooldown, alert-once, click action, action buttons (Clip / Snapshot / Silence 30 min with optional presence-gated re-enable), multiple `notify.` targets.
 
-## How media URLs work (verified against the HA integration proxy)
+## How media URLs work (verified against Frigate's HA notification proxy)
 
-The notification proxy (`frigate-hass-integration` `views.py`) is **event-keyed**:
+The proxy has separate URL forms for tracked-object media and review media:
 
-- `…/api/frigate/notifications/{event_id}/snapshot.jpg` → `api/events/{event_id}/snapshot.jpg`
-- `…/api/frigate/notifications/{event_id}/event_preview.gif` → `api/events/{event_id}/preview.gif`
-- `…/api/frigate/notifications/{event_id}/{camera}/clip.mp4` → `api/events/{event_id}/clip.mp4`
+- `…/api/frigate/notifications/{event_id}/snapshot.jpg` → tracked-object snapshot
+- `…/api/frigate/notifications/{event_id}/event_preview.gif` → tracked-object GIF
+- `…/api/frigate/notifications/{event_id}/{camera}/clip.mp4` → tracked-object clip
+- `…/api/frigate/notifications/{review_id}/review_preview.gif` → review-scoped GIF
 
-So snapshots/GIF/clip links use the **triggering event id**, while the notification **tag** (update identity) uses the **review id**. Do not swap these — a review id in a media path 404s.
+The initial snapshot and the explicit Clip/Snapshot action links remain event-keyed and use the newest event id from `data.detections | max`. End-of-review and GenAI GIF updates use the review id with `review_preview.gif`, so their media is tied to the same review as the notification tag. Do not use a review id with an event-keyed endpoint (or an event id with the review GIF endpoint).
 
-**Which event id?** The MOST RECENT detection in the review — resolved as `data.detections | max` (event ids string-compare by their epoch prefix, so the maximum is the newest activation). This is deliberate: for long-lived reviews (an object staying in view, e.g. a car parked for hours) the departure review bundles the still-open old event id alongside newer ones, and anchoring media to the oldest event made end/departure updates show the arrival. A review's detection list can also grow or reorder between the `new`/`end`/`genai` messages, so the `max` resolution keeps snapshot, GIF and clip consistent across every update of the same review (Phase 1, end-GIF update, and GenAI safety net).
+## Changes in 2026-09-24
+
+- **Review-scoped GIF for every review duration.** End-of-review and GenAI GIF updates now use `review_preview.gif` keyed by the review id, rather than switching to the newest detection's event GIF after 180 seconds. Event ids are not mapped to the review's object labels, so selecting the newest event could attach media for a different detection. Initial snapshots and Clip/Snapshot actions remain event-keyed.
 
 ## Changes in 2026-09-18
 
@@ -77,6 +80,7 @@ So snapshots/GIF/clip links use the **triggering event id**, while the notificat
 
 ## History
 
+- **2026-09-24:** All end-of-review and GenAI GIFs use the review-scoped `review_preview.gif`, keyed to the notification review id; snapshots and action links remain event-keyed.
 - **2026-09-18:** Silence re-enable guard inputs wired into the blueprint's `variables:` block — they were declared but undefined, so the guard was a no-op and every silence expiry logged a template warning; the check is now `guard == '' or is_state(guard, state)`.
 - **2026-09-15:** Silence re-enable gated by an optional presence guard entity/state (single check at delay expiry; blank = previous behavior).
 - **2026-09-09:** Review-scoped preview GIF for short reviews (≤ 180 s); wait-loop re-resolves the media id per payload.
