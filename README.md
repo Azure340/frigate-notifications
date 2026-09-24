@@ -2,7 +2,7 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** 2026-09-24 (date-based versioning — the version is the release date)
+- **Version:** 2026-09-24b (date-based; `b` marks a same-day follow-up)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
 - **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
@@ -21,14 +21,29 @@ The proxy has separate URL forms for tracked-object media and review media:
 
 - `…/api/frigate/notifications/{event_id}/snapshot.jpg` → tracked-object snapshot
 - `…/api/frigate/notifications/{event_id}/event_preview.gif` → tracked-object GIF
-- `…/api/frigate/notifications/{event_id}/{camera}/clip.mp4` → tracked-object clip
+- `…/api/frigate/notifications/{event_id}/clip.mp4` → tracked-object clip
 - `…/api/frigate/notifications/{review_id}/review_preview.gif` → review-scoped GIF
 
 The initial snapshot and the explicit Clip/Snapshot action links remain event-keyed and use the newest event id from `data.detections | max`. End-of-review and GenAI GIF updates use the review id with `review_preview.gif`, so their media is tied to the same review as the notification tag. Do not use a review id with an event-keyed endpoint (or an event id with the review GIF endpoint).
 
+For multiple Frigate instances, the `client_id` input accepts the MQTT client ID with or without surrounding slashes; the blueprint normalizes the path segment. Leave it blank for a single instance.
+
+### Notification proxy access
+
+The Frigate integration's notification media proxy is deliberately unauthenticated so mobile devices can fetch pushed media. Keep it enabled only when you use it, and choose `notification_proxy_expire_after_seconds` deliberately: `0` means media URLs never expire. A finite expiry is evaluated from the timestamp prefix of the event/review ID, so allow for long review durations as well as the period users may need to open an old notification.
+
 ## Changes in 2026-09-24
 
 - **Review-scoped GIF for every review duration.** End-of-review and GenAI GIF updates now use `review_preview.gif` keyed by the review id, rather than switching to the newest detection's event GIF after 180 seconds. Event ids are not mapped to the review's object labels, so selecting the newest event could attach media for a different detection. Initial snapshots and Clip/Snapshot actions remain event-keyed.
+
+## Changes in 2026-09-24b
+
+- **Current metadata now describes the review-scoped GIF.** Updated the blueprint summary to match the deployed `review_preview.gif` behavior; earlier dated notes remain historical.
+- **Multi-instance URL normalization:** `client_id` can be entered with or without slashes.
+- **Canonical event links:** Clip actions now use `/notifications/{event_id}/clip.mp4` without the unused camera segment.
+- **`final_update` is consistent:** when disabled, the GenAI safety-net refresh keeps the snapshot rather than reattaching a GIF.
+- **GenAI safety-net timing:** default raised from 10 to 20 seconds, five seconds after the default 15-second GIF delay, matching the documented ordering.
+- **Notification proxy security:** Home Assistant's `notification_proxy_expire_after_seconds` is set to 86400 (24 hours) on the audited instance; `0` means no expiry.
 
 ## Changes in 2026-09-18
 
@@ -81,6 +96,7 @@ The initial snapshot and the explicit Clip/Snapshot action links remain event-ke
 ## History
 
 - **2026-09-24:** All end-of-review and GenAI GIFs use the review-scoped `review_preview.gif`, keyed to the notification review id; snapshots and action links remain event-keyed.
+- **2026-09-24b:** Metadata/media docs corrected; client-id paths normalized; clip URL canonicalized; `final_update` now also governs GenAI GIF attachment; GenAI delay default aligned to follow the GIF delay.
 - **2026-09-18:** Silence re-enable guard inputs wired into the blueprint's `variables:` block — they were declared but undefined, so the guard was a no-op and every silence expiry logged a template warning; the check is now `guard == '' or is_state(guard, state)`.
 - **2026-09-15:** Silence re-enable gated by an optional presence guard entity/state (single check at delay expiry; blank = previous behavior).
 - **2026-09-09:** Review-scoped preview GIF for short reviews (≤ 180 s); wait-loop re-resolves the media id per payload.
