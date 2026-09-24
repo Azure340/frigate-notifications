@@ -43,7 +43,6 @@ The Frigate integration's notification media proxy is deliberately unauthenticat
 - **Canonical event links:** Clip actions now use `/notifications/{event_id}/clip.mp4` without the unused camera segment.
 - **`final_update` is consistent:** when disabled, the GenAI safety-net refresh keeps the snapshot rather than reattaching a GIF.
 - **GenAI safety-net timing:** default raised from 10 to 20 seconds, five seconds after the default 15-second GIF delay, matching the documented ordering.
-- **Notification proxy security:** Home Assistant's `notification_proxy_expire_after_seconds` is set to 86400 (24 hours) on the audited instance; `0` means no expiry.
 
 ## Changes in 2026-09-18
 
