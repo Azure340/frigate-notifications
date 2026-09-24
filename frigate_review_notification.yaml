@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-24)
+  name: Frigate Review Notification (2026-09-24b)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -9,11 +9,10 @@ blueprint:
     the escalation instead of being missed.
 
     After Phase 1 the main run updates the SAME notification in place (silently):
-      - Event end -> swaps the snapshot for the triggering detection's own
-        preview GIF (event_preview.gif). The end update also LISTENS for the
-        genai message during the GIF delay window, so when Frigate publishes
-        the AI summary quickly (typical: 1-2s after end) the AI title/summary
-        arrives TOGETHER with the GIF in one update.
+      - Event end -> swaps the snapshot for the review-scoped preview GIF
+        (review_preview.gif, keyed by the review id), regardless of review
+        duration. The end update also listens for the genAI message during the
+        GIF delay window, so a prompt summary can arrive with the GIF update.
       - Sub-label changes -> refresh the message.
     GenAI is ALSO handled by a dedicated MQTT trigger that re-asserts the AI
     update 'Delay before AI title update' seconds after Frigate publishes it -
@@ -127,6 +126,10 @@ blueprint:
     notification tag instead of selecting the newest event GIF, which is not
     guaranteed to correspond to the review's announced object labels. Initial
     snapshots and Clip/Snapshot action links remain event-keyed.
+    2026-09-24b changes: normalized optional client_id path separators,
+    switched clip actions to the documented event URL, made final_update apply
+    to the GenAI safety-net GIF as well, and set its default delay to 20 seconds
+    so it follows the 15-second GIF delay as documented.
   domain: automation
   input:
     camera:
@@ -214,7 +217,7 @@ blueprint:
         title already arrives WITH the event-end GIF update, so this only
         matters for late summaries. Keep at least ~5s longer than the
         'Delay before GIF update'.
-      default: 10
+      default: 20
       selector:
         number:
           min: 0
@@ -240,7 +243,8 @@ blueprint:
       selector:
         boolean:
     final_update:
-      name: Send GIF update on event end
+      name: Attach review GIF to ended-review updates
+      description: If off, both the event-end update and any ended-review GenAI safety-net update retain a snapshot instead of attaching the review GIF.
       default: true
       selector:
         boolean:
@@ -299,7 +303,7 @@ blueprint:
         text:
     client_id:
       name: Frigate client ID (optional)
-      description: Leave blank unless you run multiple Frigate instances.
+      description: Enter the MQTT client_id without slashes; the blueprint adds the required path separator. Leave blank for one Frigate instance.
       default: ""
       selector:
         text:
@@ -341,7 +345,8 @@ variables:
   click_action: !input click_action
   input_base_url: !input base_url
   base_url: "{{ input_base_url.rstrip('/') if input_base_url else '' }}"
-  client_id: !input client_id
+  input_client_id: !input client_id
+  client_id: "{{ ('/' ~ (input_client_id | trim('/'))) if (input_client_id | trim('/')) else '' }}"
   genai_title: ""
   genai_summary: ""
   genai_done: false
@@ -445,8 +450,8 @@ actions:
               sub_labels: "{{ data.get('sub_labels', []) }}"
               label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
               notification_icon: !input notification_icon
-              attachment_url: "{{ (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ gif_id ~ '/' ~ gif_file) if ended else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1') }}"
-              attachment_type: "{{ 'gif' if ended else 'jpeg' }}"
+              attachment_url: "{{ (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ gif_id ~ '/' ~ gif_file) if (ended and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1') }}"
+              attachment_type: "{{ 'gif' if (ended and final_update) else 'jpeg' }}"
           - if:
               - "{{ genai_has_content }}"
             then:
@@ -476,7 +481,7 @@ actions:
                           actions:
                             - action: URI
                               title: Clip
-                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/clip.mp4"
                             - action: URI
                               title: Snapshot
                               uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
@@ -535,7 +540,7 @@ actions:
                           actions:
                             - action: URI
                               title: Clip
-                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                              uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/clip.mp4"
                             - action: URI
                               title: Snapshot
                               uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
@@ -605,7 +610,7 @@ actions:
                                 actions:
                                   - action: URI
                                     title: Clip
-                                    uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                                    uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/clip.mp4"
                                   - action: URI
                                     title: Snapshot
                                     uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
@@ -662,7 +667,7 @@ actions:
                                     actions:
                                       - action: URI
                                         title: Clip
-                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/clip.mp4"
                                       - action: URI
                                         title: Snapshot
                                         uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
@@ -697,7 +702,7 @@ actions:
                                     actions:
                                       - action: URI
                                         title: Clip
-                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera_name }}/clip.mp4"
+                                        uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/clip.mp4"
                                       - action: URI
                                         title: Snapshot
                                         uri: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
