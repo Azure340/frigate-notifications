@@ -280,7 +280,7 @@ blueprint:
             - mdi:cctv
             - mdi:account
             - >-
-              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Dog' in label else
+              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Cat' in label else
               'dog' if 'Dog' in label else
               'car' if 'Car' in label else
               'cctv' }}
