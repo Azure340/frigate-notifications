@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-09-24b)
+  name: Frigate Review Notification (2026-10-07)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -130,6 +130,17 @@ blueprint:
     switched clip actions to the documented event URL, made final_update apply
     to the GenAI safety-net GIF as well, and set its default delay to 20 seconds
     so it follows the 15-second GIF delay as documented.
+
+    2026-10-07 changes: the default notification icon is now matched against
+    the detected object CLASSES in 'objects' (with the '-verified' suffix
+    stripped) instead of the display 'label'. The label template drops
+    '-verified' entries and keeps only sub-labels, so once Frigate assigned a
+    sub-label (LPR plate, face name) the keyword match failed at GenAI time
+    and the safety-net update - which lands last - overwrote the correct
+    Phase-1 object icon with the generic cctv icon. Class-based matching keeps
+    the icon identical across Phase 1, the GIF update and the GenAI update.
+    Matching is exact class membership, so a sub-label like 'Carrot' can no
+    longer match 'Car'. The dropdown example template uses the same approach.
   domain: automation
   input:
     camera:
@@ -267,14 +278,13 @@ blueprint:
         Change the icon that displays on the notification (Android status-bar
         icon). You can enter a single icon or create a template like the
         example given in the dropdown. You must include 'mdi:' in the icon
-        name. The default template shows a car when a car is detected, a
-        person for a person, a cat for a cat, etc.
+        name. The default template matches the detected object classes from
+        'objects' (with '-verified' stripped), so it stays correct when Frigate
+        assigns a sub-label (LPR plate, face name): a car keeps the car icon,
+        a person keeps the person icon, etc. Templates may reference 'objects'
+        (class list) and 'label' (display text).
       default: >-
-        {% set l = label | default('') %}mdi:{{ 'account' if 'Person' in l else
-        'cat' if 'Cat' in l else
-        'dog' if 'Dog' in l else
-        'car' if 'Car' in l
-        else 'package-variant' if ('Package' in l or 'Amazon' in l) else 'cctv' }}
+        {% set objs = objects | default([], true) | map('replace', '-verified', '') | list | unique | list | map('lower') | list %}mdi:{{ 'account' if 'person' in objs else 'cat' if 'cat' in objs else 'dog' if 'dog' in objs else 'car' if 'car' in objs else 'package-variant' if ('package' in objs or 'amazon' in objs) else 'cctv' }}
       selector:
         select:
           custom_value: true
@@ -284,10 +294,7 @@ blueprint:
             - mdi:cctv
             - mdi:account
             - >-
-              mdi:{{ 'account' if 'Person' in label else 'cat' if 'Cat' in label else
-              'dog' if 'Dog' in label else
-              'car' if 'Car' in label else
-              'cctv' }}
+              {% set o = objects | default([], true) | map('replace', '-verified', '') | list | map('lower') | list %}mdi:{{ 'account' if 'person' in o else 'car' if 'car' in o else 'cctv' }}
     click_action:
       name: Click action (Frigate panel path)
       default: /ccab4aaf_frigate-proxy/dashboard

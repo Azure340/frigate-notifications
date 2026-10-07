@@ -2,7 +2,7 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** 2026-09-24b (date-based; `b` marks a same-day follow-up)
+- **Version:** 2026-10-07 (date-based)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
 - **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
@@ -31,6 +31,10 @@ For multiple Frigate instances, the `client_id` input accepts the MQTT client ID
 ### Notification proxy access
 
 The Frigate integration's notification media proxy is deliberately unauthenticated so mobile devices can fetch pushed media. Keep it enabled only when you use it, and choose `notification_proxy_expire_after_seconds` deliberately: `0` means media URLs never expire. A finite expiry is evaluated from the timestamp prefix of the event/review ID, so allow for long review durations as well as the period users may need to open an old notification.
+
+## Changes in 2026-10-07
+
+- **Notification icon no longer flips to `mdi:cctv` on the GenAI update (bug fix).** The default `notification_icon` template (and the dropdown example) now matches the detected object classes from `objects` with the `-verified` suffix stripped, instead of the display `label`. `label` drops `-verified` entries and keeps only sub-labels, so once Frigate assigned a sub-label (LPR plate, face name) the keyword match failed and the GenAI safety-net update — which deliberately lands last — overwrote the correct Phase-1 object icon with the generic CCTV icon. Class-based matching keeps the icon identical across Phase 1, the end-of-review GIF update and the GenAI update, and exact membership means a sub-label like `Carrot` can no longer match `Car`. Existing automations that do not set `notification_icon` pick up the new default on blueprint re-import.
 
 ## Changes in 2026-09-24
 
@@ -94,6 +98,7 @@ The Frigate integration's notification media proxy is deliberately unauthenticat
 
 ## History
 
+- **2026-10-07:** Notification icon matched against object classes (`objects`, `-verified` stripped) instead of `label` — fixes the icon flipping to `mdi:cctv` when the GenAI update landed after an LPR/face sub-label was assigned.
 - **2026-09-24:** All end-of-review and GenAI GIFs use the review-scoped `review_preview.gif`, keyed to the notification review id; snapshots and action links remain event-keyed.
 - **2026-09-24b:** Metadata/media docs corrected; client-id paths normalized; clip URL canonicalized; `final_update` now also governs GenAI GIF attachment; GenAI delay default aligned to follow the GIF delay.
 - **2026-09-18:** Silence re-enable guard inputs wired into the blueprint's `variables:` block — they were declared but undefined, so the guard was a no-op and every silence expiry logged a template warning; the check is now `guard == '' or is_state(guard, state)`.
