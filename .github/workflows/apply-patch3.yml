@@ -1,0 +1,27 @@
+name: apply-patch3
+
+on:
+  push:
+    branches:
+      - bp-2026-10-31c
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run patch
+        run: python3 __bp_patch3.py
+      - name: Commit and clean up
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A frigate_review_notification.yaml README.md
+          git commit -m "fix(blueprint): restore the original Phase 1 notification"
+          git rm -q __bp_patch3.py .github/workflows/apply-patch3.yml
+          git commit -m "ci: remove patch scaffolding"
+          git push
