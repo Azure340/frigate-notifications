@@ -556,7 +556,7 @@ actions:
               notification_channel: "{{ channel_pref if channel_pref else ((camera_name ~ ' Detection') if camera_name else 'Frigate Detection') }}"
               label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
               notification_icon: !input notification_icon
-              message: "{{ label }} detected - {{ camera_name }} at {{ time_label }}"
+              message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
               tag: "{{ review_id }}"
               severity_satisfied: "{{ ((event.get('after', {}).get('severity')) or 'detection') in review_severity }}"
               attachment_url: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg?bbox=1"
@@ -570,8 +570,8 @@ actions:
                     - action: "{{ repeat.item }}"
                       continue_on_error: true
                       data:
-                        title: "{{ (time_label ~ ' ') if ai_title_timestamp else '' }}{{ label }} detected"
-                        message: "{{ camera_name }}{{ (' at ' ~ time_label) if not ai_title_timestamp else '' }}"
+                        title: ""
+                        message: "{{ message }}"
                         data:
                           tag: "{{ tag }}"
                           group: "{{ camera_name }}-frigate-notification"
@@ -628,7 +628,7 @@ actions:
                     gif_id: "{{ review_id }}"
                     gif_file: review_preview.gif
                     label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
-                    message: "{{ label }} detected - {{ camera_name }} at {{ time_label }}"
+                    message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
                     attachment_url: "{{ ((base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ gif_id ~ '/' ~ gif_file) if (seen_end and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1')) }}"
                     attachment_type: "{{ 'gif' if (seen_end and final_update) else 'jpeg' }}"
                 - if:
@@ -640,8 +640,8 @@ actions:
                           - action: "{{ repeat.item }}"
                             continue_on_error: true
                             data:
-                              title: "{{ (time_label ~ ' ') if ai_title_timestamp else '' }}{{ label }} detected"
-                              message: "{{ camera_name }}{{ (' at ' ~ time_label) if not ai_title_timestamp else '' }}"
+                              title: ""
+                              message: "{{ message }}"
                               data:
                                 tag: "{{ tag }}"
                                 group: "{{ camera_name }}-frigate-notification"
