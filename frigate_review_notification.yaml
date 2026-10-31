@@ -147,8 +147,7 @@ blueprint:
     fits within the cap it is kept whole; otherwise the text is cut on a word
     boundary with a single ellipsis and trailing punctuation stripped, so a
     body never ends in a dangling comma. Titles carry the review's own start
-    time via the ai_title_timestamp input (default on): '2:04 PM Person
-    standing on front porch' instead of 'Person standing on front porch'. The
+    time via the ai_title_timestamp input (default on): the time is appended to the end of the title - 'Person standing on front porch at 2:04 PM'. The
     time comes from after.start_time, never from the model.
   domain: automation
   input:
@@ -492,7 +491,7 @@ actions:
               genai_summary: "{{ metadata.get('shortSummary', '') }}"
               review_start: "{{ event.get('after', {}).get('start_time') or now().timestamp() }}"
               time_label: "{{ review_start | float(0) | timestamp_custom('%I:%M %p') | regex_replace('^0', '') }}"
-              ai_title: "{{ (time_label ~ ' ') if ai_title_timestamp else '' }}{{ genai_title }}"
+              ai_title: "{{ genai_title }}{{ (' at ' ~ time_label) if ai_title_timestamp else '' }}"
               ai_summary: "{% set n = summary_max_chars | int(0) %}{% set s = (genai_summary or '') | trim %}{% if not s or n <= 0 %}{{ s }}{% else %}{% set first = s.split('. ')[0] | trim(' ,;:.') %}{% if (first | length) + 1 <= n %}{{ first }}.{% else %}{{ s | truncate(n, false, '…', 0) | regex_replace('[ ,;]+…$', '…') }}{% endif %}{% endif %}"
               genai_has_content: "{{ (metadata.get('title', '') or metadata.get('shortSummary', '')) | length > 0 }}"
               notification_channel: "{{ channel_pref if channel_pref else ((camera_name ~ ' Detection') if camera_name else 'Frigate Detection') }}"
@@ -692,7 +691,7 @@ actions:
                             genai_done: "{{ got_genai or (genai_done | default(false)) }}"
                             genai_title: "{{ genai_meta.get('title', '') if got_genai else (genai_title | default('')) }}"
                             genai_summary: "{{ genai_meta.get('shortSummary', '') if got_genai else (genai_summary | default('')) }}"
-                            ai_title: "{{ (time_label ~ ' ') if ai_title_timestamp else '' }}{{ genai_title }}"
+                            ai_title: "{{ genai_title }}{{ (' at ' ~ time_label) if ai_title_timestamp else '' }}"
                             ai_summary: "{% set n = summary_max_chars | int(0) %}{% set s = (genai_summary or '') | trim %}{% if not s or n <= 0 %}{{ s }}{% else %}{% set first = s.split('. ')[0] | trim(' ,;:.') %}{% if (first | length) + 1 <= n %}{{ first }}.{% else %}{{ s | truncate(n, false, '…', 0) | regex_replace('[ ,;]+…$', '…') }}{% endif %}{% endif %}"
                             gif_wait_left: "{{ [final_delay - (now().timestamp() - (end_seen_ts | default(0))), 0] | max }}"
                         - delay:
