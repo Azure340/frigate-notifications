@@ -11,48 +11,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: bp-2026-10-31
-      - name: Apply patch and assert hash
+      - name: Apply verified patch
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import io, hashlib
-          p = 'frigate_review_notification.yaml'
-          s = io.open(p, encoding='utf-8').read()
-          before = hashlib.sha256(s.encode()).hexdigest()
-          print('input sha256:', before)
-          assert before == '1da4fdd97b57291c56e477ec88988268040bc9ea8d11d855209daf81855dfbc4', 'unexpected base file'
-
-          def rep(old, new, count=1):
-              global s
-              n = s.count(old)
-              assert n == count, (n, count, old[:70])
-              s = s.replace(old, new)
-
-          rep('''    update_sub_label:
-                name: Update notification when sub-label changes'''.replace('\n                ', '\n      '), '''    summary_max_chars:
-                name: AI summary max length (characters)
-                description: >-
-                  Truncate the AI shortSummary used as the notification body.
-                  0 disables truncation. Frigate's review schema enforces
-                  70-140 characters server side, so this only changes what the
-                  phone displays - never the model or the latency. 60-70 reads
-                  as roughly one line.
-                default: 70
-                selector:
-                  number:
-                    min: 0
-                    max: 140
-                    step: 5
-                    mode: box
-              ai_title_timestamp:
-                name: Prefix titles with the review start time
-                description: >-
-                  Renders titles as '8:20 AM Person seen at Front Door' instead
-                  of 'Person seen at Front Door'. The time comes from the
-                  review's own start_time (server side), never from the model.
-                default: true
-                selector:
-                  boolean:
-              update_sub_label:
-                name: Update notification when sub-label changes'''.replace('\n                ', '\n      '))
-          PY
+          python3 __bp_patch.py
+      - name: Commit blueprint and remove CI scaffolding
+        run: |
+          set -euo pipefail
+          git config user.name "Azure340"
+          git config user.email "230386615+Azure340@users.noreply.github.com"
+          git rm -q __bp_patch.py .github/workflows/bp-apply-patch.yml
+          git add frigate_review_notification.yaml
+          git commit -m "2026-10-31: cap AI summary length, prefix titles with review start time"
+          git push origin HEAD:bp-2026-10-31
