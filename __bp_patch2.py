@@ -1,13 +1,4 @@
-import hashlib
 import io
-
-BP_IN = 'b860d7a18b2f2be223d59bf312d8f5ada93d7945f1a50781e449bf2d22d13ba9'
-BP_OUT = '86113c95acac0484180fc1d70b386d566843070318e57183c401908fa2f3ec6a'
-RD_OUT = '314e05b186425e4026c6ce0c05a4df0a5bc6b99c2f27a7aa295bae3b0083c7a1'
-
-
-def sha(text):
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
 def rep(text, old, new, count=1):
@@ -18,8 +9,6 @@ def rep(text, old, new, count=1):
 
 bp = 'frigate_review_notification.yaml'
 s = io.open(bp, encoding='utf-8').read()
-print('bp in :', sha(s))
-assert sha(s) == BP_IN, 'unexpected blueprint base'
 
 old_expr = "{{ genai_summary | truncate(summary_max_chars | int(0), false, '…', 0) if (genai_summary and (summary_max_chars | int(0)) > 0) else genai_summary }}"
 new_expr = (
@@ -33,47 +22,47 @@ new_expr = (
 )
 s = rep(s, old_expr, new_expr, 2)
 
-s = rep(s, '''      description: >-
-        Truncate the AI shortSummary used as the notification body. 0 disables
+s = rep(s, '''        Truncate the AI shortSummary used as the notification body. 0 disables
         truncation. Frigate's review schema enforces 70-140 characters server
         side, so this only changes what the phone displays - never the model
         or the latency. 60-70 reads as roughly one line on a phone.
-      default: 70''', '''      description: >-
-        Cap the AI shortSummary used as the notification body; 0 disables the
+      default: 70''', '''        Cap the AI shortSummary used as the notification body; 0 disables the
         cap. Frigate's review schema enforces 70-140 characters server side, so
         this never affects the model or the latency - only what the phone shows.
         When the first sentence fits within the cap it is kept whole; otherwise
         the text is cut on a word boundary with a single ellipsis and trailing
-        punctuation removed. ~110 keeps most one-sentence summaries intact;
-        lower it for a tighter body.
+        punctuation removed, so a body never ends in a dangling comma.
+        ~110 keeps most one-sentence summaries intact.
       default: 110''')
 
 s = rep(s, '''    Matching is exact class membership, so a sub-label like 'Carrot' can no
     longer match 'Car'. The dropdown example template uses the same approach.''', '''    Matching is exact class membership, so a sub-label like 'Carrot' can no
     longer match 'Car'. The dropdown example template uses the same approach.
+
     2026-10-31 changes: the notification body is capped via the new
     summary_max_chars input (default 110, 0 = off). When the first sentence
-    fits it is kept whole; otherwise the text is cut on a word boundary with a
-    single ellipsis and trailing punctuation stripped, so bodies no longer end
-    in a dangling comma. Titles carry the review's own start time via the new
-    ai_title_timestamp input (default on): '2:04 PM Person standing on front
-    porch' instead of 'Person standing on front porch'. The time comes from
-    after.start_time, never from the model. Both inputs have defaults, so
-    existing automations pick them up on re-import with no edits.''')
+    fits within the cap it is kept whole; otherwise the text is cut on a word
+    boundary with a single ellipsis and trailing punctuation stripped, so a
+    body never ends in a dangling comma. Titles carry the review's own start
+    time via the ai_title_timestamp input (default on): '2:04 PM Person
+    standing on front porch' instead of 'Person standing on front porch'. The
+    time comes from after.start_time, never from the model.''', 1)
+
+assert s.count('regex_replace(\'[ ,;]+…$\', \'…\')') == 2, 'new expression not applied twice'
+assert 'default: 110' in s
+assert '2026-10-31 changes' in s
 
 io.open(bp, 'w', encoding='utf-8').write(s)
-print('bp out:', sha(s))
-assert sha(s) == BP_OUT, 'blueprint output mismatch'
+print('blueprint patched')
 
 rd = 'README.md'
 r = io.open(rd, encoding='utf-8').read()
-print('rd in :', sha(r))
 
 r = rep(r, '- **Version:** 2026-10-07 (date-based)', '- **Version:** 2026-10-31 (date-based)')
 
 section = '''## Changes in 2026-10-31
 
-- **AI summary is capped, and cut cleanly (new `summary_max_chars` input, default `110`).** The notification body is Frigate's `shortSummary`. If the first sentence fits within the cap it is kept whole; otherwise the text is cut on a word boundary with a single trailing ellipsis and any dangling punctuation removed - the body no longer ends in `,...` the way a plain `truncate` filter leaves it. Set the input to `0` to pass the summary through untouched. Frigate's review schema enforces 70-140 characters server-side, so the cap never changes what the model produces or how long a description takes.
+- **AI summary is capped, and cut cleanly (new `summary_max_chars` input, default `110`).** The notification body is Frigate's `shortSummary`. If the first sentence fits within the cap it is kept whole; otherwise the text is cut on a word boundary with a single trailing ellipsis and any dangling punctuation removed - so the body no longer ends in `,...` the way a bare `truncate` filter leaves it. Set the input to `0` to pass the summary through untouched. Frigate's review schema enforces 70-140 characters server-side, so the cap never changes what the model produces or how long a description takes.
 - **Titles carry the review start time (new `ai_title_timestamp` input, default on).** Titles render as `2:04 PM Person standing on front porch near driveway` instead of `Person standing on front porch near driveway`. The time is the review's own `after.start_time`, formatted with `timestamp_custom('%I:%M %p')` and the leading zero stripped - it is never generated by the model, so it cannot drift. Phase 1 uses the same shape, so the first ping matches the final one. Turn the input off to restore bare titles.
 - **No input was renamed or removed.** Both new inputs have defaults, so existing automations pick them up on blueprint re-import with no edits. `summary_max_chars: 0` restores the exact pre-2026-10-31 body.
 
@@ -81,9 +70,7 @@ section = '''## Changes in 2026-10-31
 
 assert r.count('## Changes in 2026-10-07') == 1
 r = rep(r, '## Changes in 2026-10-07', section + '## Changes in 2026-10-07')
+assert '- **Version:** 2026-10-31' in r
 
 io.open(rd, 'w', encoding='utf-8').write(r)
-print('rd out:', sha(r))
-assert sha(r) == RD_OUT, 'readme output mismatch'
-
-print('OK: both files patched and verified')
+print('readme patched')
