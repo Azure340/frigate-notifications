@@ -2,7 +2,7 @@
 
 A three-phase Frigate 0.18 review notification blueprint for Home Assistant.
 
-- **Version:** 2026-10-31 (date-based)
+- **Version:** 2026-11-27 (date-based)
 - **Requires:** Frigate 0.18+, Frigate integration (MQTT `frigate/reviews`), MQTT broker, HA companion app
 - **License:** MIT — see [LICENSE](LICENSE). Heavily rewritten from SgtBatten's Frigate Notifications blueprint — thanks for the inspiration.
 
@@ -31,6 +31,15 @@ For multiple Frigate instances, the `client_id` input accepts the MQTT client ID
 ### Notification proxy access
 
 The Frigate integration's notification media proxy is deliberately unauthenticated so mobile devices can fetch pushed media. Keep it enabled only when you use it, and choose `notification_proxy_expire_after_seconds` deliberately: `0` means media URLs never expire. A finite expiry is evaluated from the timestamp prefix of the event/review ID, so allow for long review durations as well as the period users may need to open an old notification.
+
+## Changes in 2026-11-27
+
+Notification media reliability. Nothing about what triggers a notification changed.
+
+- **One media key instead of two.** Each notify payload sent the same URL as both `image` and `attachment.url`; the app downloaded it twice per push (observed: 2-3 identical `GET`s of the same `review_preview.gif` within 110 ms). Only `image` is sent now. An iOS device would need `attachment` added back.
+- **Longer GIF window.** `final_delay` 15 -> 25 s, `genai_send_delay` 20 -> 30 s (keep them ~5 s apart). More time for Frigate to finish `review_preview.gif`; the end-of-review update arrives ~10 s later.
+- **Safety net deduplicated.** The `genai` trigger skips a summary that arrives inside the main run's GIF window (review ended less than `final_delay` ago) because the main run already sends it with the GIF. Open reviews still go through the safety net.
+- **Removed:** the unused `attachment_type` variables.
 
 ## Changes in 2026-10-31
 
@@ -104,6 +113,7 @@ The Frigate integration's notification media proxy is deliberately unauthenticat
 
 ## History
 
+- **2026-11-27:** Media reliability - single `image` key (no duplicate download per push), `final_delay` 25 s / `genai_send_delay` 30 s, and the GenAI safety net skips summaries already delivered with the GIF update.
 - **2026-10-07:** Notification icon matched against object classes (`objects`, `-verified` stripped) instead of `label` — fixes the icon flipping to `mdi:cctv` when the GenAI update landed after an LPR/face sub-label was assigned.
 - **2026-09-24:** All end-of-review and GenAI GIFs use the review-scoped `review_preview.gif`, keyed to the notification review id; snapshots and action links remain event-keyed.
 - **2026-09-24b:** Metadata/media docs corrected; client-id paths normalized; clip URL canonicalized; `final_update` now also governs GenAI GIF attachment; GenAI delay default aligned to follow the GIF delay.
