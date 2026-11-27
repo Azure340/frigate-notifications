@@ -2,6 +2,26 @@
 
 New entries are added at the top. Entries dated 2026-09-06 through 2026-10-31 live in the `Changes in ...` sections of [README.md](README.md) and are unchanged.
 
+## 2026-11-27 - media reliability: one media key, longer GIF window, deduplicated safety net
+
+`frigate_review_notification.yaml` changed. Triggering is untouched; the notify payloads and two delay defaults changed.
+
+### Every push downloaded the same file twice
+
+All five notify payloads sent the media URL twice - `image: <url>` and `attachment: {url: <url>, content-type: ...}` - pointing at the SAME file. The Companion app fetches both keys, so one push produced 2-3 identical `GET`s: measured on a live install, the same `review_preview.gif` was requested twice within 110 ms by one device and three times in a row by another. Only `image` is sent now (the key Android renders from). iOS would need `attachment` restored. Net effect: half the media requests per notification, so half the chances that a slow or failed fetch leaves the notification without a picture.
+
+### Longer window before the GIF is fetched
+
+`final_delay` 15 -> 25 s and `genai_send_delay` 20 -> 30 s. They must move together: the re-assertion has to stay longer than the GIF delay or the AI update lands first and is then overwritten by the GIF update. Frigate gets 10 s more to write `review_preview.gif`, and the end-of-review update is 10 s later on the phone.
+
+### The safety net no longer duplicates a push
+
+The `genai` trigger now also requires the review to have ended at least `final_delay` seconds ago (or to still be open). A summary that arrives inside the main run's GIF window is already delivered WITH the GIF update, so the second push was a duplicate that re-downloaded the media - and because it lands last, a failed fetch there blanked the image on an otherwise good notification. Reviews with no `end_time` still always go through the safety net.
+
+### Removed
+
+The three `attachment_type` variables, unused once `attachment` was dropped.
+
 ## 2026-11-12 - documentation only, blueprint file unchanged
 
 `frigate_review_notification.yaml` is byte-identical to the 2026-10-31 build. Nothing in the automation logic changed. This entry records configuration that is now known to be required, plus Home Assistant Companion (Android) behaviour measured against a live install, so the dead ends are not retried.
