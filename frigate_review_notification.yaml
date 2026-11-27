@@ -1,5 +1,5 @@
 blueprint:
-  name: Frigate Review Notification (2026-10-31)
+  name: Frigate Review Notification (2026-11-27)
   description: >-
     Three-phase Frigate review notification, one automation per camera selection.
     Phase 1: sends '<Label> detected' + snapshot (beeps once) as soon as the
@@ -149,6 +149,23 @@ blueprint:
     body never ends in a dangling comma. Titles carry the review's own start
     time via the ai_title_timestamp input (default on): the time is appended to the end of the title - 'Person standing on front porch at 2:04 PM'. The
     time comes from after.start_time, never from the model.
+
+    2026-11-27 changes: media reliability. Removed the duplicated media field
+    from every notify payload - 'image' and 'attachment.url' carried the SAME
+    url, so each push made the companion app download the same snapshot/GIF
+    twice (observed on this instance: one push, 2-3 identical GETs within
+    110 ms). Android renders the image from 'image', so only that key is sent
+    now (an iOS device would need 'attachment' added back). Raised the
+    defaults 'Delay before GIF update' 15 -> 25 s and 'Delay before AI
+    re-assertion' 20 -> 30 s (they must stay ~5 s apart) so Frigate has
+    finished writing review_preview.gif before the phone fetches it. The
+    GenAI safety-net branch now also skips a summary that arrives INSIDE the
+    main run's GIF window (review ended less than final_delay ago), because
+    the main run already delivers that summary with the GIF update - that
+    removes a third duplicate push per event, which previously re-downloaded
+    the media and could land last with a failed fetch, leaving the
+    notification without a picture. Reviews that are still open are always
+    handled by the safety net.
   domain: automation
   input:
     camera:
@@ -236,7 +253,7 @@ blueprint:
         title already arrives WITH the event-end GIF update, so this only
         matters for late summaries. Keep at least ~5s longer than the
         'Delay before GIF update'.
-      default: 20
+      default: 30
       selector:
         number:
           min: 0
@@ -249,7 +266,7 @@ blueprint:
         Window at event end for the AI summary to arrive and ride along with
         the GIF update; also gives Frigate time to finish writing the GIF.
         0 sends immediately.
-      default: 15
+      default: 25
       selector:
         number:
           min: 0
@@ -475,6 +492,8 @@ actions:
             value_template: "{{ ((trigger.payload_json.get('after', {}).get('severity')) or 'detection') in review_severity }}"
           - condition: template
             value_template: "{{ (now().timestamp() - ((trigger.payload_json.get('after', {}).get('end_time')) or trigger.payload_json.get('after', {}).get('start_time') or 0)) < 900 }}"
+          - condition: template
+            value_template: "{{ (trigger.payload_json.get('after', {}).get('end_time') is none) or ((now().timestamp() - trigger.payload_json.get('after', {}).get('end_time')) >= (final_delay | int(0))) }}"
         sequence:
           - variables:
               event: "{{ trigger.payload_json }}"
@@ -500,7 +519,6 @@ actions:
               label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
               notification_icon: !input notification_icon
               attachment_url: "{{ (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ gif_id ~ '/' ~ gif_file) if (ended and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1') }}"
-              attachment_type: "{{ 'gif' if (ended and final_update) else 'jpeg' }}"
           - if:
               - "{{ genai_has_content }}"
             then:
@@ -521,9 +539,6 @@ actions:
                           clickAction: "{{ click_action }}"
                           notification_icon: "{{ notification_icon }}"
                           image: "{{ attachment_url }}"
-                          attachment:
-                            url: "{{ attachment_url }}"
-                            content-type: "{{ attachment_type }}"
                           ttl: 0
                           priority: high
                           alert_once: "{{ alert_once }}"
@@ -559,7 +574,6 @@ actions:
               tag: "{{ review_id }}"
               severity_satisfied: "{{ ((event.get('after', {}).get('severity')) or 'detection') in review_severity }}"
               attachment_url: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg?bbox=1"
-              attachment_type: jpeg
           - if:
               - "{{ severity_satisfied }}"
             then:
@@ -578,9 +592,6 @@ actions:
                           clickAction: "{{ click_action }}"
                           notification_icon: "{{ notification_icon }}"
                           image: "{{ attachment_url }}"
-                          attachment:
-                            url: "{{ attachment_url }}"
-                            content-type: "{{ attachment_type }}"
                           ttl: 0
                           priority: high
                           push:
@@ -629,7 +640,6 @@ actions:
                     label: "{% set data = namespace(labels=[]) %} {% for obj in objects %}\n  {% if '-verified' not in obj %}\n    {% set data.labels = data.labels + [obj] %}\n  {% endif %}\n{% endfor %} {% set data.labels = data.labels + sub_labels %} {{ data.labels | unique | list | sort | join(', ') | title }}"
                     message: "{{ label }} detected - {{ camera_name }} at {{ event.get('after', {}).get('start_time', now().timestamp()) | timestamp_custom('%H:%M') }}"
                     attachment_url: "{{ ((base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ gif_id ~ '/' ~ gif_file) if (seen_end and final_update) else (base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1')) }}"
-                    attachment_type: "{{ 'gif' if (seen_end and final_update) else 'jpeg' }}"
                 - if:
                     - "{{ not (sent_phase1 | default(false)) and severity_satisfied }}"
                   then:
@@ -648,9 +658,6 @@ actions:
                                 clickAction: "{{ click_action }}"
                                 notification_icon: "{{ notification_icon }}"
                                 image: "{{ attachment_url }}"
-                                attachment:
-                                  url: "{{ attachment_url }}"
-                                  content-type: "{{ attachment_type }}"
                                 ttl: 0
                                 priority: high
                                 push:
@@ -711,9 +718,6 @@ actions:
                                     clickAction: "{{ click_action }}"
                                     notification_icon: "{{ notification_icon }}"
                                     image: "{{ attachment_url }}"
-                                    attachment:
-                                      url: "{{ attachment_url }}"
-                                      content-type: "{{ attachment_type }}"
                                     ttl: 0
                                     priority: high
                                     alert_once: "{{ alert_once }}"
@@ -746,9 +750,6 @@ actions:
                                     clickAction: "{{ click_action }}"
                                     notification_icon: "{{ notification_icon }}"
                                     image: "{{ attachment_url }}"
-                                    attachment:
-                                      url: "{{ attachment_url }}"
-                                      content-type: "{{ attachment_type }}"
                                     ttl: 0
                                     priority: high
                                     alert_once: "{{ alert_once }}"
